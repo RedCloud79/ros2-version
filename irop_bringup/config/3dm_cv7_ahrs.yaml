@@ -1,0 +1,11 @@
+microstrain_inertial_driver:
+  ros__parameters:
+    port: "/dev/ttyACM0"
+    baudrate: 115200
+
+    filter_pps_source: 0
+    filter_declination_source: 1
+
+    frame_id: "imu_link"
+    imu_frame_id: "imu_link"
+    filter_frame_id: "imu_link"
