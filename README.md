@@ -1,60 +1,41 @@
-Finished <<< nav2_bringup [14.1s]
---- stderr: hdl_global_localization          
-CMake Deprecation Warning at /opt/ros/humble/share/rosidl_cmake/cmake/rosidl_target_interfaces.cmake:32 (message):
-  Use rosidl_get_typesupport_target() and target_link_libraries() instead of
-  rosidl_target_interfaces()
-Call Stack (most recent call first):
-  CMakeLists.txt:81 (rosidl_target_interfaces)
-
-
-CMake Deprecation Warning at /opt/ros/humble/share/rosidl_cmake/cmake/rosidl_target_interfaces.cmake:32 (message):
-  Use rosidl_get_typesupport_target() and target_link_libraries() instead of
-  rosidl_target_interfaces()
-Call Stack (most recent call first):
-  CMakeLists.txt:90 (rosidl_target_interfaces)
-
-
-In this package, headers install destination is set to `include` by ament_auto_package. It is recommended to install `include/hdl_global_localization` instead and will be the default behavior of ament_auto_package from ROS 2 Kilted Kaiju. On distributions before Kilted, ament_auto_package behaves the same way when you use USE_SCOPED_HEADER_INSTALL_DIR option.
-CMake Warning:
-  Manually-specified variables were not used by the project:
-
-    CATKIN_INSTALL_INTO_PREFIX_ROOT
-    HUMBLE_ROS
-    ROS_EDITION
-
-
----
-Finished <<< hdl_global_localization [2min 1s]
-Starting >>> hdl_localization
---- stderr: hdl_localization                
-** WARNING ** io features related to pcap will be disabled
-CMake Error at CMakeLists.txt:47 (find_package):
-  By not providing "Findfast_gicp.cmake" in CMAKE_MODULE_PATH this project
-  has asked CMake to find a package configuration file provided by
-  "fast_gicp", but CMake did not find one.
-
-  Could not find a package configuration file provided by "fast_gicp" with
-  any of the following names:
-
-    fast_gicpConfig.cmake
-    fast_gicp-config.cmake
-
-  Add the installation prefix of "fast_gicp" to CMAKE_PREFIX_PATH or set
-  "fast_gicp_DIR" to a directory containing one of the above files.  If
-  "fast_gicp" provides a separate development package or SDK, be sure it has
-  been installed.
-
-
----
-Failed   <<< hdl_localization [5.08s, exited with code 1]
-Aborted  <<< irop_bringup [30.4s]                      
-Aborted  <<< livox_ros_driver2 [1min 38s]               
-Aborted  <<< livox_sdk2 [2min 10s]                      
-Aborted  <<< vectornav [1min 32s]                       
-Aborted  <<< nav2_msgs [3min 21s]           
-
-Summary: 14 packages finished [3min 25s]
-  1 package failed: hdl_localization
-  5 packages aborted: irop_bringup livox_ros_driver2 livox_sdk2 nav2_msgs vectornav
-  19 packages had stderr output: costmap_converter_msgs fast_gicp hdl_global_localization hdl_localization irop_bringup irop_camera irop_description irop_pose_publisher irop_safety_manager livox_sdk2 nav2_bringup nav2_common nav2_msgs nav2_voxel_grid ndt_omp pointcloud_concatenate vectornav vectornav_msgs yhs_can_interfaces
-  18 packages not processed
+Starting >>> nav2_smac_planner
+[Processing: costmap_converter, nav2_behaviors, nav2_bt_navigator, nav2_constrained_smoother, nav2_controller, nav2_navfn_planner, nav2_planner, nav2_smac_planner]
+--- stderr: costmap_converter                
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/src/costmap_to_dynamic_obstacles/blob_detector.cpp: In static member function ‘static cv::Ptr<BlobDetector> BlobDetector::create(const cv::SimpleBlobDetector::Params&)’:
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/src/costmap_to_dynamic_obstacles/blob_detector.cpp:9:56: error: invalid new-expression of abstract class type ‘BlobDetector’
+    9 |   return cv::Ptr<BlobDetector> (new BlobDetector(params)); // compatibility with older versions
+      |                                                        ^
+In file included from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/src/costmap_to_dynamic_obstacles/blob_detector.cpp:1:
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_to_dynamic_obstacles/blob_detector.h:60:7: note:   because the following virtual functions are pure within ‘BlobDetector’:
+   60 | class BlobDetector : public cv::SimpleBlobDetector
+      |       ^~~~~~~~~~~~
+In file included from /usr/include/opencv4/opencv2/features2d/features2d.hpp:48,
+                 from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_to_dynamic_obstacles/blob_detector.h:48,
+                 from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/src/costmap_to_dynamic_obstacles/blob_detector.cpp:1:
+/usr/include/opencv4/opencv2/features2d.hpp:789:24: note:     ‘virtual void cv::SimpleBlobDetector::setParams(const cv::SimpleBlobDetector::Params&)’
+  789 |   CV_WRAP virtual void setParams(const SimpleBlobDetector::Params& params ) = 0;
+      |                        ^~~~~~~~~
+/usr/include/opencv4/opencv2/features2d.hpp:790:46: note:     ‘virtual cv::SimpleBlobDetector::Params cv::SimpleBlobDetector::getParams() const’
+  790 |   CV_WRAP virtual SimpleBlobDetector::Params getParams() const = 0;
+      |                                              ^~~~~~~~~
+gmake[2]: *** [CMakeFiles/costmap_converter.dir/build.make:160: CMakeFiles/costmap_converter.dir/src/costmap_to_dynamic_obstacles/blob_detector.cpp.o] Error 1
+gmake[2]: *** Waiting for unfinished jobs....
+In file included from /opt/ros/humble/include/rclcpp/rclcpp/logging.hpp:24,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/client.hpp:40,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/callback_group.hpp:24,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/any_executable.hpp:20,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategy.hpp:25,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategies.hpp:18,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/executor_options.hpp:20,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/executor.hpp:37,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/executors/multi_threaded_executor.hpp:25,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/executors.hpp:21,
+                 from /opt/ros/humble/include/rclcpp/rclcpp/rclcpp.hpp:155,
+                 from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_converter_interface.h:46,
+                 from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_to_lines_ransac.h:42,
+                 from /home/irop/ros2_ws/src/costmap_converter/costmap_converter/src/costmap_to_lines_ransac.cpp:39:
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_converter_interface.h: In member function ‘void costmap_converter::BaseCostmapToPolygons::startWorker(rclcpp::GenericRate<std::chrono::_V2::system_clock>::SharedPtr, nav2_costmap_2d::Costmap2D*, bool)’:
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_converter_interface.h:197:41: warning: too many arguments for format [-Wformat-extra-args]
+  197 |         RCLCPP_DEBUG(nh_->get_logger(), "costmap_converter", "Spinning up a thread for the CostmapToPolygons plugin");
+      |                                         ^~~~~~~~~~~~~~~~~~~
+/home/irop/ros2_ws/src/costmap_converter/costmap_converter/include/costmap_converter/costmap_converter_interface.h: In member function ‘void costmap_converter::BaseCostmapToDynamicObstacles::loadStaticCostmapConverterPlugin(const string&, rclcpp::Node::SharedPtr)’:
