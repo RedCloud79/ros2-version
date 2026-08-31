@@ -1,5 +1,7 @@
-Starting >>> vectornav_msgs
---- stderr: nav2_common               
+inished <<< costmap_converter_msgs [16.1s]
+Starting >>> nav2_voxel_grid
+--- stderr: pointcloud_concatenate     
+In this package, headers install destination is set to `include` by ament_auto_package. It is recommended to install `include/pointcloud_concatenate` instead and will be the default behavior of ament_auto_package from ROS 2 Kilted Kaiju. On distributions before Kilted, ament_auto_package behaves the same way when you use USE_SCOPED_HEADER_INSTALL_DIR option.
 CMake Warning:
   Manually-specified variables were not used by the project:
 
@@ -7,30 +9,27 @@ CMake Warning:
     ROS_EDITION
 
 
+In file included from /home/irop/ros2_ws/src/pointcloud_concatenate/src/pointcloud_concatenate/offset_concatenate_pointclouds.cpp:15:
+/home/irop/ros2_ws/src/pointcloud_concatenate/include/pointcloud_concatenate/offset_concatenate_pointclouds.hpp:30:10: fatal error: point_cloud_msg_wrapper/point_cloud_msg_wrapper.hpp: No such file or directory
+   30 | #include <point_cloud_msg_wrapper/point_cloud_msg_wrapper.hpp>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+gmake[2]: *** [CMakeFiles/pointcloud_concatenate_node.dir/build.make:76: CMakeFiles/pointcloud_concatenate_node.dir/src/pointcloud_concatenate/offset_concatenate_pointclouds.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:139: CMakeFiles/pointcloud_concatenate_node.dir/all] Error 2
+gmake[1]: *** Waiting for unfinished jobs....
+gmake: *** [Makefile:146: all] Error 2
 ---
-Finished <<< nav2_common [5.54s]
-Starting >>> nav2_msgs
---- stderr: hdl_global_localization    
-CMake Error at /opt/ros/humble/share/rosidl_cmake/cmake/rosidl_generate_interfaces.cmake:229 (message):
-  Packages installing interfaces must include
-  '<member_of_group>rosidl_interface_packages</member_of_group>' in their
-  package.xml
-Call Stack (most recent call first):
-  CMakeLists.txt:44 (rosidl_generate_interfaces)
+Failed   <<< pointcloud_concatenate [29.2s, exited with code 2]
+Aborted  <<< nav2_voxel_grid [39.0s]              
+Aborted  <<< vectornav_msgs [55.1s]
+Aborted  <<< yhs_can_interfaces [57.7s]           
+Aborted  <<< ndt_omp [1min 6s]                        
+Aborted  <<< fast_gicp [1min 43s]                      
+Aborted  <<< hdl_global_localization [1min 51s]        
+Aborted  <<< nav2_msgs [2min 19s]          
 
-
----
-Failed   <<< hdl_global_localization [10.3s, exited with code 1]
-Aborted  <<< costmap_converter_msgs [11.0s]       
-Aborted  <<< nav2_msgs [9.78s]                    
-Aborted  <<< pointcloud_concatenate [25.7s]       
-Aborted  <<< vectornav_msgs [41.7s]               
-Aborted  <<< yhs_can_interfaces [44.0s]           
-Aborted  <<< ndt_omp [52.1s]                      
-Aborted  <<< fast_gicp [1min 26s]          
-
-Summary: 1 package finished [1min 27s]
-  1 package failed: hdl_global_localization
-  7 packages aborted: costmap_converter_msgs fast_gicp nav2_msgs ndt_omp pointcloud_concatenate vectornav_msgs yhs_can_interfaces
-  9 packages had stderr output: costmap_converter_msgs fast_gicp hdl_global_localization nav2_common nav2_msgs ndt_omp pointcloud_concatenate vectornav_msgs yhs_can_interfaces
-  29 packages not processed
+Summary: 2 packages finished [2min 26s]
+  1 package failed: pointcloud_concatenate
+  7 packages aborted: fast_gicp hdl_global_localization nav2_msgs nav2_voxel_grid ndt_omp vectornav_msgs yhs_can_interfaces
+  10 packages had stderr output: costmap_converter_msgs fast_gicp hdl_global_localization nav2_common nav2_msgs nav2_voxel_grid ndt_omp pointcloud_concatenate vectornav_msgs yhs_can_interfaces
+  28 packages not processed
