@@ -1,12 +1,5 @@
 # state_machine_litever.cpp 기능 정리
 
-대상 파일: [`src/state_machine_litever.cpp`](src/state_machine_litever.cpp)
-
-`state_machine_litever.cpp`는 로봇의 작업, 수동 조작, 정지, 복귀, 도킹 및
-비상 정지 상태를 관리하는 ROS 상태 머신이다. 외부에서는
-`state_machine_control` 토픽으로 키 입력을 전달하고, 현재 상태는
-`state_machine_status` 토픽으로 발행한다.
-
 ## 1. 상태 목록
 
 | 내부 상태명 | 기능 |
@@ -44,19 +37,6 @@ CheckData
 state_machine_control : market_state_machine/StateMachine
 ```
 
-주요 필드는 다음과 같다.
-
-```text
-int32 key
-string name
-string[] points
-int32 pan
-int32 tilt
-int32 zoom
-int32 rtime
-int32 buffer
-```
-
 상태 머신은 주로 `key`를 사용하며, 포인트·작업 실행 시 나머지 필드를 함께
 사용한다.
 
@@ -76,8 +56,7 @@ int32 buffer
 | 16 | `Manual` 진입 |
 | 20 | 시작 설정의 초기 자세 발행 |
 
-`Idle`의 키 6(`Move_point` 직접 진입)은 현재 사용하지 않는다. 포인트 이동은
-각 진입 명령과 함께 포인트명을 전달하며, `Move_point` 상태 자체는
+포인트 이동은 각 진입 명령과 함께 포인트명을 전달하며, `Move_point` 상태 자체는
 `Work`, `Stop`, `Home`, `Docking`에서 계속 사용된다.
 
 ### `Manual`
@@ -92,14 +71,7 @@ int32 buffer
 | 21 | Stand 모션 상태 요청 |
 | 22 | Sitting 모션 상태 요청 |
 
-수동 조작 입력은 다음 토픽으로 받는다.
-
-```text
-cmd_vel_manual : geometry_msgs/Twist
-```
-
-수동 모드가 활성화되고 BasicStatus로 모드 전환이 확인된 경우에만 입력을
-`/cmd_vel`로 전달한다. `manual_control_enabled` 토픽은 사용하지 않는다.
+수동 으로 제어하는 상태이다.
 
 ## 5. Manual 진입 및 모드 확인
 
@@ -180,77 +152,74 @@ BasicStatus가 아직 없거나 값이 0·2가 아니면 상태 발행을 잠시
 작업 중 장애물 또는 안전 상태가 감지되면 `Stop`으로 전이하고, 정지 원인과
 이전 상태에 따라 작업 재개 위치를 결정한다.
 
-## 9. 상태 발행
-
-발행 토픽:
-
-```text
-state_machine_status : market_state_machine/StateMachineStatus
-```
-
-메시지 필드:
-
-```text
-string prevState
-string curState
-```
-
-일반 상태는 내부 상태명과 동일하게 발행한다. 단, 내부 `Manual` 상태는
-BasicStatus 확인 후 `Manual_Assist` 또는 `Manual_Regular`로 변환해서 발행한다.
-
 ## 10. 주요 기능 연결 구조
 
 상태 머신의 실제 운용 흐름은 `Idle`에서 작업을 선택하고, 작업 중에는
 `Work`·`Move_point`·`Stop`·`Home`으로 분기하는 구조다.
 
 ```mermaid
-flowchart TD
-    CM[CheckMap] --> CD[CheckData]
-    CD -->|startup task + 도크 장착| DK[Docking]
-    CD -->|그 외| IDLE[Idle]
+flowchart LR
+    subgraph INIT[초기화]
+        CM[CheckMap] --> CD[CheckData]
+    end
 
-    IDLE -->|키 1 + 포인트명| WORK[Work]
-    IDLE -->|키 3 + task명| WORK
-    IDLE -->|키 5 startup task| WORK
-    IDLE -->|키 4| HOME[Home]
-    IDLE -->|키 7| DEBUG[Debug]
+    subgraph MAIN[일반 작업 흐름]
+        IDLE[Idle]
+        WORK[Work]
+        MP[Move_point]
+        MOVE[포인트 이동 실행]
+        IDLE -->|1 포인트명| WORK
+        IDLE -->|3 task명| WORK
+        IDLE -->|5 startup task| WORK
+        WORK -->|3 포인트명| MP
+        MP -->|진입 즉시 실행| MOVE
+        MOVE -->|성공| IDLE
+    end
 
-    WORK -->|키 3 + 포인트명| MP[Move_point]
-    WORK -->|키 1 / 장애물 / 안전| STOP[Stop]
-    WORK -->|키 2| HOME
-    WORK -->|작업 완료| HOME
+    subgraph RECOVERY[정지·복귀 흐름]
+        STOP[Stop]
+        HOME[Home]
+        DOCK[Docking]
+        STOP -->|1 재개| WORK
+        STOP -->|2| IDLE
+        STOP -->|3| HOME
+        STOP -->|4 포인트명| MP
+        HOME -->|2 포인트명| MP
+        HOME -->|도착| DOCK
+        DOCK -->|작업 재개| WORK
+        DOCK -->|2| IDLE
+        DOCK -->|3 포인트명| MP
+    end
 
-    MP -->|진입 즉시 포인트 이동| MP_RUN[포인트 이동 실행]
-    MP_RUN -->|성공| IDLE
-    MP_RUN -->|실패| STOP
-    MP -->|키 2| STOP
-    MP -->|키 3| HOME
-    MP -->|키 4 이상| IDLE
+    subgraph MANUAL[수동 조작]
+        MAN[Manual]
+        MODE[Assist / Regular]
+        MAN -->|3/4| MODE
+        MAN -->|1| IDLE
+        MAN -->|2| STOP
+    end
 
-    STOP -->|키 1| WORK
-    STOP -->|키 2| IDLE
-    STOP -->|키 3| HOME
-    STOP -->|키 4 + 포인트명| MP
+    CD -->|startup task + 도크 장착| DOCK
+    CD -->|그 외| IDLE
+    IDLE -->|4| HOME
+    IDLE -->|7| DEBUG[Debug]
+    WORK -->|1 / 장애물 / 안전| STOP
+    WORK -->|2 / 작업 완료| HOME
+    MOVE -->|실패| STOP
+    MP -->|2| STOP
+    MP -->|3| HOME
+    MP -->|4 이상| IDLE
 
-    HOME -->|키 2 + 포인트명| MP
-    HOME -->|도착| DK
-    DK -->|키 3 + 포인트명| MP
-    DK -->|작업 재개| WORK
-    DK -->|키 2| IDLE
+    IDLE -.->|16| MAN
+    STOP -.->|16| MAN
+    HOME -.->|16| MAN
+    MP -.->|16| MAN
+    DOCK -.->|16| MAN
 
-    IDLE -.->|키 16| MAN[Manual]
-    STOP -.->|키 16| MAN
-    HOME -.->|키 16| MAN
-    MP -.->|키 16| MAN
-    DK -.->|키 16| MAN
-    MAN -->|키 1| IDLE
-    MAN -->|키 2| STOP
-    MAN -->|키 3/4| MODE[Assist / Regular 모드 변경]
-
-    classDef normal fill:#e8f1ff,stroke:#3b82f6,color:#111;
+    classDef normal fill:#e8f1ff,stroke:#2563eb,color:#111;
     classDef control fill:#fff4d6,stroke:#d97706,color:#111;
     classDef safety fill:#ffe4e6,stroke:#e11d48,color:#111;
-    class IDLE,WORK,MP,HOME,DK,DEBUG normal;
+    class IDLE,WORK,MP,MOVE,HOME,DOCK,DEBUG normal;
     class MAN,MODE control;
     class STOP safety;
 ```
@@ -390,18 +359,6 @@ Manual 내부 키 동작:
 Manual 상태에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`·`Stop`
 전이를 수행하지 않는다. 다만 배터리 강제 복귀 로직은 별도 전역 로직이므로
 조건에 따라 Manual 종료 후 `Home`으로 보낼 수 있다.
-
-## 15. 기능별 진입 가능 여부
-
-| 현재 상태 | Move_point | Run task | Stop | Manual |
-|---|---:|---:|---:|---:|
-| `Idle` | 직접 진입 안 함 | 키 3·5 | - | 키 16 |
-| `Work` | 키 3 + 포인트명 | 작업 실행 중 | 키 1/장애물/안전 | 진입 불가 |
-| `Move_point` | 진입 시 즉시 실행 | - | 키 2/이동 실패 | 키 16 |
-| `Stop` | 키 4 + 포인트명 | 재개 키 1 | 유지 | 키 16 |
-| `Home` | 키 2 + 포인트명 | - | 키 1/실패 | 키 16 |
-| `Docking` | 키 3 + 포인트명 | 작업 재개 | 도킹 흐름에 따라 처리 | 키 16 |
-| `Manual` | - | - | 키 2 | 이미 Manual |
 
 핵심 구조는 `Idle`에서 작업을 시작하고, 작업 중 문제가 생기면 `Stop`에서
 복구 방향을 선택하며, 수동 조작은 `Manual`에서만 외부 속도 입력을 허용하는
