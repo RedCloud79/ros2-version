@@ -358,6 +358,10 @@ Manual에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`�
 Emergency button 입력은 `is_emergency_button_pressed`(`std_msgs/Bool`)로
 수신한다. 다음 상태에서는 버튼이 눌려도 전역 자동 전이를 수행하지 않는다.
 
+현재 운용에서는 NATS의 stop 명령이 이 입력을 `true`로 만드는 경로로 사용될
+수 있다. 상태 머신 입장에서는 물리 버튼인지 NATS 명령인지 구분하지 않고
+Bool 값만 처리한다.
+
 | 현재 상태 | Emergency button 처리 |
 |---|---|
 | `CheckMap` | 자동 전이하지 않음 |
@@ -366,14 +370,15 @@ Emergency button 입력은 `is_emergency_button_pressed`(`std_msgs/Bool`)로
 | `EmergencyStop` | 이미 해당 상태이므로 유지 |
 | 그 외 운용 상태 | `EmergencyStop`으로 전이 |
 
-운용 상태에서 버튼이 눌리면 현재 작업을 취소하고 경고등을 점멸시킨다.
-버튼이 해제될 때까지 `EmergencyStop`에 머물며, 해제되면 `Stop`으로 전이한다.
+운용 상태에서 `true`가 들어오면 현재 작업을 취소하고 경고등을 점멸시킨다.
+`false`가 들어오기 전까지 `EmergencyStop`에 머물며, `false`가 들어오면
+`Stop`으로 전이한다.
 
 ```text
 운용 상태
-  ↓ Emergency button pressed
+  ↓ Bool = true (Emergency button 또는 NATS stop)
 EmergencyStop
-  ↓ button released
+  ↓ Bool = false
 Stop
 ```
 
@@ -425,14 +430,16 @@ flowchart LR
     end
 
     subgraph SAFETY[비상 정지]
+        NATS_STOP[NATS stop 명령]
         ESTOP[EmergencyStop]
+        NATS_STOP -->|Bool=true| ESTOP
         WORK -.->|Emergency button| ESTOP
         IDLE -.->|Emergency button| ESTOP
         MP -.->|Emergency button| ESTOP
         STOP -.->|Emergency button| ESTOP
         HOME -.->|Emergency button| ESTOP
         DK -.->|Emergency button| ESTOP
-        ESTOP -->|button released| STOP
+        ESTOP -->|Bool=false| STOP
     end
 
     subgraph MANUAL[수동 조작]
