@@ -77,8 +77,8 @@ int32 buffer
 | 20 | 시작 설정의 초기 자세 발행 |
 
 `Idle`의 키 6(`Move_point` 직접 진입)은 현재 사용하지 않는다. 포인트 이동은
-키 1을 통해 처리하며, `Move_point` 상태 자체는 `Work`, `Stop`, `Home`,
-`Docking`에서 계속 사용된다.
+각 진입 명령과 함께 포인트명을 전달하며, `Move_point` 상태 자체는
+`Work`, `Stop`, `Home`, `Docking`에서 계속 사용된다.
 
 ### `Manual`
 
@@ -203,29 +203,56 @@ BasicStatus 확인 후 `Manual_Assist` 또는 `Manual_Regular`로 변환해서 �
 상태 머신의 실제 운용 흐름은 `Idle`에서 작업을 선택하고, 작업 중에는
 `Work`·`Move_point`·`Stop`·`Home`으로 분기하는 구조다.
 
-```text
-                         ┌──────────────┐
-                         │    Manual    │
-                         │ Assist/Regular│
-                         └──────┬───────┘
-                                │ 1: Idle / 2: Stop
-                                │
-┌────────┐  작업 선택       ┌───▼────┐  작업 중  ┌────────────┐
-│  Idle  ├──────────────────►│ Work  ├─────────►│Move_point  │
-└──┬─────┘                   └──┬────┘          └─────┬──────┘
-   │                            │ 1: Stop              │ 완료
-   │ 4: Home                    │ 2: Home              ▼
-   │ 16: Manual                 ▼                    Idle
-   │                       ┌────────┐
-   └──────────────────────►│  Stop  │◄── 장애물/안전/수동 정지
-                            └─┬──┬───┘
-                         1: 재개 │ 3: Home
-                         2: Idle  │ 4: Move_point
-                                 ▼
-                              Home
-                                 │ 도착
-                                 ▼
-                              Docking
+```mermaid
+flowchart TD
+    CM[CheckMap] --> CD[CheckData]
+    CD -->|startup task + 도크 장착| DK[Docking]
+    CD -->|그 외| IDLE[Idle]
+
+    IDLE -->|키 1 + 포인트명| WORK[Work]
+    IDLE -->|키 3 + task명| WORK
+    IDLE -->|키 5 startup task| WORK
+    IDLE -->|키 4| HOME[Home]
+    IDLE -->|키 7| DEBUG[Debug]
+
+    WORK -->|키 3 + 포인트명| MP[Move_point]
+    WORK -->|키 1 / 장애물 / 안전| STOP[Stop]
+    WORK -->|키 2| HOME
+    WORK -->|작업 완료| HOME
+
+    MP -->|진입 즉시 포인트 이동| MP_RUN[포인트 이동 실행]
+    MP_RUN -->|성공| IDLE
+    MP_RUN -->|실패| STOP
+    MP -->|키 2| STOP
+    MP -->|키 3| HOME
+    MP -->|키 4 이상| IDLE
+
+    STOP -->|키 1| WORK
+    STOP -->|키 2| IDLE
+    STOP -->|키 3| HOME
+    STOP -->|키 4 + 포인트명| MP
+
+    HOME -->|키 2 + 포인트명| MP
+    HOME -->|도착| DK
+    DK -->|키 3 + 포인트명| MP
+    DK -->|작업 재개| WORK
+    DK -->|키 2| IDLE
+
+    IDLE -.->|키 16| MAN[Manual]
+    STOP -.->|키 16| MAN
+    HOME -.->|키 16| MAN
+    MP -.->|키 16| MAN
+    DK -.->|키 16| MAN
+    MAN -->|키 1| IDLE
+    MAN -->|키 2| STOP
+    MAN -->|키 3/4| MODE[Assist / Regular 모드 변경]
+
+    classDef normal fill:#e8f1ff,stroke:#3b82f6,color:#111;
+    classDef control fill:#fff4d6,stroke:#d97706,color:#111;
+    classDef safety fill:#ffe4e6,stroke:#e11d48,color:#111;
+    class IDLE,WORK,MP,HOME,DK,DEBUG normal;
+    class MAN,MODE control;
+    class STOP safety;
 ```
 
 ## 11. Move_point 기능
@@ -236,14 +263,13 @@ BasicStatus 확인 후 `Manual_Assist` 또는 `Manual_Regular`로 변환해서 �
 
 | 진입 경로 | 의미 |
 |---|---|
-| `Work` 키 3 | 작업 중 포인트 이동으로 전환 |
-| `Stop` 키 4 | 정지 상태에서 포인트 이동 선택 |
-| `Home` 키 2 | 홈 이동 중 포인트 이동 선택 |
-| `Docking` 키 3 | 도크 상태에서 포인트 이동 선택 |
+| `Work` 키 3 + 포인트명 | 작업 중 포인트 이동으로 전환 및 즉시 실행 |
+| `Stop` 키 4 + 포인트명 | 정지 상태에서 포인트 이동 선택 및 즉시 실행 |
+| `Home` 키 2 + 포인트명 | 홈 이동 중 포인트 이동 선택 및 즉시 실행 |
+| `Docking` 키 3 + 포인트명 | 도크 상태에서 포인트 이동 선택 및 즉시 실행 |
 
 | 키/조건 | 동작 |
 |---|---|
-| 1 | 선택한 포인트로 이동 시작 |
 | 2 | 이동 취소 후 `Stop` |
 | 3 | 이동 취소 후 `Home` |
 | 4 이상 | 이동 취소 후 `Idle` |
@@ -251,8 +277,10 @@ BasicStatus 확인 후 `Manual_Assist` 또는 `Manual_Regular`로 변환해서 �
 | 이동 실패 | `Stop` |
 | 16 | `Manual` 진입 요청. 단, 실제 전이는 전역 조건에서 처리 |
 
-포인트 이동을 시작할 때는 포인트 이동 서버를 호출하며, 도착 후 추가 작업과
-대기 시간을 건너뛰도록 `buffer=1`을 사용한다.
+포인트명은 `Move_point`로 전이하는 명령과 함께 전달한다. `Move_point`에
+진입하면 포인트 이동 서버를 즉시 호출하며, 도착 후 추가 작업과 대기 시간을
+건너뛰도록 `buffer=1`을 사용한다. 따라서 `Move_point` 진입 후 별도의 키 1을
+입력하지 않는다.
 
 ## 12. Run task 기능
 
@@ -281,7 +309,7 @@ Run task와 관련된 주요 입력은 다음과 같다.
 | `Idle` | 5 | `startup.task` 실행 |
 | `Work` | 1 | 작업 정지 후 `Stop` |
 | `Work` | 2 | 작업 취소 후 `Home` |
-| `Work` | 3 | 현재 작업을 멈추고 `Move_point` |
+| `Work` | 3 + 포인트명 | 현재 작업을 멈추고 `Move_point` 즉시 실행 |
 | `Work` | 4 | 작업 반복/다음 작업/복귀 흐름 처리 |
 
 `Idle` 키 1의 포인트 이동은 일반 task와 구분된다. 키 1은 선택한 포인트를
@@ -368,11 +396,11 @@ Manual 상태에서는 비상 버튼과 안전 감지에 의한 자동 `Emergenc
 | 현재 상태 | Move_point | Run task | Stop | Manual |
 |---|---:|---:|---:|---:|
 | `Idle` | 직접 진입 안 함 | 키 3·5 | - | 키 16 |
-| `Work` | 키 3 | 작업 실행 중 | 키 1/장애물/안전 | 진입 불가 |
-| `Move_point` | 포인트 선택 | - | 키 2/이동 실패 | 키 16 |
-| `Stop` | 키 4 | 재개 키 1 | 유지 | 키 16 |
-| `Home` | 키 2 | - | 키 1/실패 | 키 16 |
-| `Docking` | 키 3 | 작업 재개 | 도킹 흐름에 따라 처리 | 키 16 |
+| `Work` | 키 3 + 포인트명 | 작업 실행 중 | 키 1/장애물/안전 | 진입 불가 |
+| `Move_point` | 진입 시 즉시 실행 | - | 키 2/이동 실패 | 키 16 |
+| `Stop` | 키 4 + 포인트명 | 재개 키 1 | 유지 | 키 16 |
+| `Home` | 키 2 + 포인트명 | - | 키 1/실패 | 키 16 |
+| `Docking` | 키 3 + 포인트명 | 작업 재개 | 도킹 흐름에 따라 처리 | 키 16 |
 | `Manual` | - | - | 키 2 | 이미 Manual |
 
 핵심 구조는 `Idle`에서 작업을 시작하고, 작업 중 문제가 생기면 `Stop`에서
