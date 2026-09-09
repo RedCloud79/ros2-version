@@ -272,12 +272,51 @@ Manual 자체에서는 주기적으로 0 속도를 발행하는 watchdog을 사�
 | 2 | Regular 모드 요청 후 Manual 종료, `Stop` 전이 |
 | 3 | Assist 모드 요청, Manual 유지 |
 | 4 | Regular 모드 요청, Manual 유지 |
-| 21 | Stand 모션 상태 요청 |
-| 22 | Sitting 모션 상태 요청 |
+| 20 | `startup.dock` 기준으로 `initialpose` 발행 |
+| 21 | Stand 모션 상태 요청 (`SetMotionState.state=1`) |
+| 22 | Sitting 모션 상태 요청 (`SetMotionState.state=4`) |
 
 키 3·4는 상태를 나가는 명령이 아니라 제어 모드만 바꾸는 명령이다.
 모드 변경 후 BasicStatus가 확인되면 상태 발행명이 각각
 `Manual_Assist`·`Manual_Regular`로 바뀐다.
+
+### Manual에서 자세·모션 제어
+
+Manual에서는 이동 속도뿐 아니라 로봇의 초기 자세와 기본 모션 상태도
+제어할 수 있다.
+
+#### 초기 자세 설정: 키 20
+
+키 20을 입력하면 `run_data.yaml`의 `startup.dock` 좌표와 방향을 사용해
+`geometry_msgs/PoseWithCovarianceStamped` 메시지를 `initialpose`로 발행한다.
+즉, 현재 로봇의 위치를 임의로 읽는 기능이 아니라 설정 파일에 저장된 도크
+자세를 지도 기준 초기 위치로 전달하는 기능이다.
+
+```text
+Manual + 키 20
+       ↓
+run_data.yaml / startup / dock
+       ↓
+map frame의 x, y, z, w 추출
+       ↓
+initialpose 발행
+```
+
+초기 자세 발행은 `Move_point`, `Work`, `Home`에서는 차단되며, Manual에서는
+허용된다. 따라서 수동 조작 전에 로봇 위치를 도크 기준으로 재설정할 수 있다.
+
+#### Stand / Sitting: 키 21·22
+
+키 21과 키 22는 `SetMotionState` 서비스를 호출한다.
+
+```text
+키 21 → SetMotionState.state = 1 → Stand
+키 22 → SetMotionState.state = 4 → Sitting
+```
+
+서비스 호출 성공 여부를 확인해 로그로 남기며, 상태 머신 자체가 자세 완료를
+기다리는 구조는 아니다. 실제 Stand/Sitting 동작 완료는 BasicStatus 등 로봇
+상태 피드백으로 확인해야 한다.
 
 ### Manual 종료 처리
 
