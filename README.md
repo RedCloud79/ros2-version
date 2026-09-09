@@ -1,365 +1,288 @@
 # state_machine_litever.cpp 기능 정리
 
+대상 파일: [`src/state_machine_litever.cpp`](src/state_machine_litever.cpp)
+
+`state_machine_litever.cpp`는 순찰 작업, 포인트 이동, 수동 조작, 정지·복구,
+홈 이동 및 도킹 상태를 관리하는 상태 머신이다.
+
 ## 1. 상태 목록
 
-| 내부 상태명 | 기능 |
+| 상태 | 역할 |
 |---|---|
-| `CheckMap` | 지도 파일과 지도 관련 설정 확인 |
-| `CheckData` | 시작 작업 및 도킹 상태 확인 |
-| `Idle` | 대기 상태 |
-| `Manual` | 외부 수동 조작 입력을 받아 로봇을 제어 |
-| `Debug` | 포인트, 작업, 홈 위치, 영역 등을 저장·삭제 |
-| `Work` | 작업 실행 및 작업 중 이동 |
-| `Move_point` | 저장된 포인트 선택 및 이동 |
-| `Stop` | 작업·이동을 정지하고 재개/복귀 여부 선택 |
-| `Home` | 홈 위치로 이동 |
-| `Docking` | 충전 도크 진입 또는 도크 이탈 후 작업 재개 |
-| `EmergencyStop` | 비상 버튼 해제 전까지 정지 유지 |
+| `CheckMap` | 지도 및 설정 확인 |
+| `CheckData` | 시작 작업과 도킹 여부 확인 |
+| `Idle` | 작업 선택 대기 |
+| `Work` | 순찰·작업 실행 |
+| `Move_point` | 지정 포인트 이동 |
+| `Stop` | 작업 정지 및 복구 선택 |
+| `Home` | 홈 포인트 이동 |
+| `Docking` | 충전 도크 진입·이탈 및 작업 대기 |
+| `Manual` | 외부 조작기의 수동 속도 제어 |
+| `Debug` | 포인트·작업·홈·영역 설정 |
+| `EmergencyStop` | 비상 버튼 해제 전까지 정지 |
 
-## 2. 시작 흐름
-
-```text
-CheckMap
-   ↓
-CheckData
-   ├─ startup.task가 있고 도크에 있음 → Docking
-   └─ 그 외                              → Idle
-```
-
-도크 여부는 충전 상태가 아니라 `/dock/is_docked` 토픽을 기준으로 판단한다.
-도크 상태가 2초 이상 갱신되지 않으면 도크에 있지 않은 것으로 처리한다.
-
-## 3. 외부 입력
-
-입력 토픽:
+## 2. 시작 및 도킹 판단
 
 ```text
-state_machine_control : market_state_machine/StateMachine
+CheckMap → CheckData
+              ├─ startup.task 존재 + 도킹 상태 true → Docking
+              └─ 그 외                              → Idle
 ```
 
-상태 머신은 주로 `key`를 사용하며, 포인트·작업 실행 시 나머지 필드를 함께
-사용한다.
+상태 머신은 `/dock/is_docked`(`std_msgs/Bool`)를 구독한다. 이 토픽은 상태
+머신이 직접 UDP를 읽어서 만드는 값이 아니라, `robot_udp_connect`의
+`docking_manager`가 UDP 상태를 종합해 발행한다.
 
-## 4. 상태별 주요 키
+`docking_manager`의 도킹 판단 기준은 다음과 같다.
 
-### `Idle`
+| UDP 상태 | `/dock/is_docked` |
+|---|---|
+| `BasicStatus.charge == 2` (`Charging`) | `true` |
+| `BatteryStatus.charge_left` 또는 `charge_right`가 `true` | `true` |
+| `BasicStatus.charge == 5` (도크에 있으나 미충전) | `true` |
+| 위 조건이 모두 아니면 | `false` |
+
+따라서 `true`는 충전 중뿐 아니라 물리적으로 도크에 있거나 접점이 감지된
+상태를 포함한다. `/dock/is_docked`가 2초 이상 갱신되지 않으면 상태 머신은
+안전을 위해 도킹되지 않은 것으로 처리한다.
+
+## 3. 순찰(run_task) 흐름
+
+### 3.1 처음 켰을 때 Idle인 경우
+
+```text
+CheckMap → CheckData → Idle
+                         ↓ run_task 입력(키 3) + task명
+                       Work
+                         ↓
+                       순찰 실행
+```
+
+`Idle`에서 키 3을 입력하면 task YAML을 확인하고 `Work`로 진입한다.
+task가 없으면 `Idle`에 유지된다.
+
+### 3.2 처음 켰을 때 Docking인 경우
+
+startup task가 있고 `/dock/is_docked == true`이면 `Docking`으로 시작한다.
+도크에서 순찰을 시작하려면 도크 상태에서 Idle로 나온 뒤 run_task를 입력한다.
+
+```text
+CheckMap → CheckData → Docking
+                         ↓ 키 2
+                       Idle
+                         ↓ 키 3 + task명
+                       Work
+```
+
+startup task를 실행하는 경우에는 `Idle`에서 키 5를 사용한다.
+
+```text
+Docking → Idle → 키 5(startup.task) → Work
+```
+
+도크에서 작업을 시작할 때는 필요한 경우 도크 이탈이 먼저 수행된다.
+
+### 3.3 순찰 중 Manual로 전환하는 경우
+
+현재 구현에서는 `Work`에서 키 16을 직접 입력해 Manual로 갈 수 없다.
+먼저 작업을 정지한 다음 Manual로 전환한다.
+
+```text
+Work
+  ↓ 키 1 또는 장애물·안전 정지
+Stop
+  ↓ 키 16
+Manual_Regular 또는 Manual_Assist
+```
+
+Manual 종료:
+
+```text
+Manual
+  ├─ 키 1 → Idle
+  └─ 키 2 → Stop
+```
+
+### 3.4 순찰 중 Move_point로 전환하는 경우
+
+다른 상태에서 `Move_point`로 전환할 때는 포인트명을 전환 명령과 함께
+전달한다. `Move_point` 진입 후 키 1을 다시 입력하지 않는다.
+
+```text
+Work
+  ↓ 키 3 + 포인트명
+Move_point
+  ↓ 진입 즉시
+포인트 이동 실행
+  ├─ 성공 → Idle
+  └─ 실패 → Stop
+```
+
+## 4. 주요 상태별 기능
+
+### Idle
 
 | 키 | 동작 |
 |---:|---|
-| 1 | 지정 포인트로 이동하고 `Work` 진입 |
-| 2 | 현재 상태 유지 |
-| 3 | 작업 실행 후 `Work` 진입 |
-| 4 | 도크에 있으면 이탈, 아니면 `Home` 이동 |
-| 5 | 시작 작업 실행. 도크 상태에 따라 `Docking` 또는 `Work` |
+| 1 + 포인트명 | 단일 포인트 작업 실행 후 `Work` |
+| 2 | 포인트 목록 표시 |
+| 3 + task명 | 선택한 task 실행 후 `Work` |
+| 4 | 도킹 중이면 도크 이탈, 아니면 `Home` |
+| 5 | `startup.task` 실행 |
 | 7 | `Debug` 진입 |
-| 8 | `Idle` 재진입 |
 | 16 | `Manual` 진입 |
-| 20 | 시작 설정의 초기 자세 발행 |
-
-포인트 이동은 각 진입 명령과 함께 포인트명을 전달하며, `Move_point` 상태 자체는
-`Work`, `Stop`, `Home`, `Docking`에서 계속 사용된다.
-
-### `Manual`
-
-| 키 | 동작 |
-|---:|---|
-| 1 | 수동 조작 종료 후 `Idle` |
-| 2 | 수동 조작 종료 후 `Stop` |
-| 3 | Assist 모드 요청 (`control_usage_mode = 2`) |
-| 4 | Regular 모드 요청 (`control_usage_mode = 0`) |
 | 20 | 초기 자세 발행 |
-| 21 | Stand 모션 상태 요청 |
-| 22 | Sitting 모션 상태 요청 |
 
-수동 으로 제어하는 상태이다.
+`Idle`의 키 6으로 `Move_point`에 직접 진입하는 기능은 사용하지 않는다.
 
-## 5. Manual 진입 및 모드 확인
+### Move_point
 
-전체 흐름은 다음과 같다.
+| 진입 상태 | 입력 | 동작 |
+|---|---|---|
+| `Work` | 키 3 + 포인트명 | 작업 취소 후 즉시 포인트 이동 |
+| `Stop` | 키 4 + 포인트명 | 정지 후 즉시 포인트 이동 |
+| `Home` | 키 2 + 포인트명 | 홈 이동 취소 후 즉시 포인트 이동 |
+| `Docking` | 키 3 + 포인트명 | 도킹 대기 중 즉시 포인트 이동 |
 
-```text
-key 16
-  ↓
-Manual 진입
-  ↓
-현재 BasicStatus 모드 확인
-  ├─ 2 → Assist 유지
-  ├─ 0 → Regular 유지
-  └─ 그 외/미확인 → Regular(0) 요청
-  ↓
-SetMode 서비스 요청
-  ↓
-BasicStatus.control_usage_mode 확인
-  ↓
-상태 발행
-```
+`Move_point::Enter()`에서 포인트 이동 서버를 호출하며 `buffer=1`로 도착 후
+추가 작업과 대기 시간을 건너뛴다.
 
-`BasicStatus.control_usage_mode`의 의미는 다음과 같다.
+| 조건 | 다음 상태 |
+|---|---|
+| 이동 성공 | `Idle` |
+| 이동 실패 | `Stop` |
+| 키 2 | `Stop` |
+| 키 3 | `Home` |
+| 키 4 이상 | `Idle` |
+| 키 16 | `Manual` |
 
-| 값 | 의미 |
-|---:|---|
-| 0 | Regular mode |
-| 1 | Navigation mode |
-| 2 | Assist mode |
+### Work / run_task
 
-상태 토픽에는 내부 상태명 `Manual`을 직접 발행하지 않는다.
-BasicStatus 확인 결과에 따라 다음 중 하나를 발행한다.
+`Work`는 `multi_point_server`로 순찰 task를 실행한다. task YAML의 `loop`,
+`wait` 설정에 따라 완료 후 `Home`, 다음 `Work`, 또는 `Docking`으로 이어질
+수 있다.
 
-```text
-Manual_Regular
-Manual_Assist
-```
+| 키/조건 | 동작 |
+|---|---|
+| 키 1 | 작업 취소 후 `Stop` |
+| 키 2 | 작업 취소 후 `Home` |
+| 키 3 + 포인트명 | 작업 취소 후 `Move_point` 즉시 실행 |
+| 단일 포인트 작업 완료 | `Idle` |
+| 일반 task 완료 | 설정에 따라 `Home` 또는 다음 작업 |
+| 장애물·안전 감지 | `Stop` |
 
-BasicStatus가 아직 없거나 값이 0·2가 아니면 상태 발행을 잠시 보류한다.
+### Stop
 
-## 6. Manual 진입 제한 및 안전 동작
-
-- `Work`에서는 키 16을 무시한다. 작업 중에는 직접 `Manual`로 진입할 수 없다.
-- `Manual`에서는 키 16을 다시 처리하지 않는다.
-- 비상 버튼이 눌린 상태에서 `Manual`로 자동 전이하지 않는다.
-- 안전 상태가 활성화되어도 `Manual`에서 자동으로 `Stop`으로 전이하지 않는다.
-- Manual 종료는 키 1 또는 키 2로 명시적으로 수행한다.
-- 배터리 강제 복귀 조건은 별도 전역 보호 로직이므로 `Home` 전이를 요청할 수
-  있다.
-
-## 7. 도킹 처리
-
-`UndockOrDocking()`은 이동 명령을 실행하기 전에 도크 상태를 확인한다.
-
-```text
-도크에 있지 않음 → 바로 다음 동작 수행
-도크에 있음     → getOutDock()으로 도크 이탈 시도
-                 성공 시 다음 동작 수행
-                 실패 시 현재 상태 유지
-```
-
-도킹 진입은 `getInDock()` 액션 서버를 사용하고, 도크 이탈은
-`getOutDock()` 액션 서버를 사용한다.
-
-## 8. 정지와 재개
-
-`Stop`은 수동 정지, 장애물 정지, 안전 정지, 비상 정지 등의 원인을 구분한다.
+`Stop`은 정지 후 사용자가 복구 방향을 선택하는 상태다.
 
 | 키 | 동작 |
 |---:|---|
 | 1 | 이전 작업 또는 이동 재개 |
 | 2 | `Idle` |
 | 3 | `Home` |
-| 4 | `Move_point` |
-| 5 | `Stop` 상태 유지 |
+| 4 + 포인트명 | `Move_point` 즉시 실행 |
 | 16 | `Manual` |
 
-작업 중 장애물 또는 안전 상태가 감지되면 `Stop`으로 전이하고, 정지 원인과
-이전 상태에 따라 작업 재개 위치를 결정한다.
+장애물 정지인 경우 장애물이 해제되면 이전 작업 위치에서 자동 재개될 수
+있다. 경로 실패나 수동 정지는 사용자의 입력을 기다린다.
 
-## 10. 주요 기능 연결 구조
+### Manual
 
-상태 머신의 실제 운용 흐름은 `Idle`에서 작업을 선택하고, 작업 중에는
-`Work`·`Move_point`·`Stop`·`Home`으로 분기하는 구조다.
+Manual 진입 후 `SetMode`를 요청하고 `/robot_udp/basic_status`의
+`control_usage_mode`를 확인한다.
+
+| 값 | 상태 발행명 |
+|---:|---|
+| 0 (Regular) | `Manual_Regular` |
+| 2 (Assist) | `Manual_Assist` |
+
+내부 상태명은 `Manual`로 유지하지만 상태 토픽에는 `Manual`을 직접 발행하지
+않는다. 수동 속도 입력은 다음 흐름으로 전달된다.
+
+```text
+외부 조작기 → cmd_vel_manual → 모드 확인 → /cmd_vel → 로봇 제어 계층
+```
+
+Manual에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`·`Stop`
+전이를 수행하지 않는다. 단, 배터리 강제 복귀는 별도 전역 로직이므로
+조건에 따라 Manual 종료 후 `Home`으로 이동할 수 있다.
+
+## 5. 도킹·홈 복귀
+
+이동 명령 전 `UndockOrDocking()`이 `/dock/is_docked`를 확인한다.
+
+```text
+도킹되지 않음 → 이동 명령 실행
+도킹됨       → 도크 이탈 시도
+                ├─ 성공 → 이동 명령 실행
+                └─ 실패 → 현재 상태 유지
+```
+
+홈 도착 후에는 `Docking`으로 전이할 수 있으며, 도킹 후 작업 대기, Idle
+복귀, 작업 재개 또는 포인트 이동을 선택한다.
+
+## 6. 주요 기능 연결 구조
+
+순찰 시작, 도킹 복귀, 포인트 이동, 정지 복구 및 Manual 전환의 전체 연결
+관계는 다음과 같다.
 
 ```mermaid
 flowchart LR
-    subgraph INIT[초기화]
+    subgraph START[시작]
         CM[CheckMap] --> CD[CheckData]
+        CD -->|startup task + is_docked=true| DK[Docking]
+        CD -->|그 외| IDLE[Idle]
     end
 
-    subgraph MAIN[일반 작업 흐름]
-        IDLE[Idle]
-        WORK[Work]
-        MP[Move_point]
-        MOVE[포인트 이동 실행]
-        IDLE -->|1 포인트명| WORK
-        IDLE -->|3 task명| WORK
-        IDLE -->|5 startup task| WORK
-        WORK -->|3 포인트명| MP
-        MP -->|진입 즉시 실행| MOVE
-        MOVE -->|성공| IDLE
+    subgraph PATROL[순찰]
+        IDLE -->|키 3 + task명| WORK[Work]
+        IDLE -->|키 5 startup.task| WORK
+        WORK -->|run_task 실행| RUN[순찰 task]
+        RUN -->|단일 포인트 완료| IDLE
+        RUN -->|일반 task 완료| HOME[Home]
+        HOME -->|도착| DK
+        DK -->|키 1 작업 재개| WORK
+        DK -->|키 2| IDLE
     end
 
-    subgraph RECOVERY[정지·복귀 흐름]
-        STOP[Stop]
-        HOME[Home]
-        DOCK[Docking]
-        STOP -->|1 재개| WORK
-        STOP -->|2| IDLE
-        STOP -->|3| HOME
-        STOP -->|4 포인트명| MP
-        HOME -->|2 포인트명| MP
-        HOME -->|도착| DOCK
-        DOCK -->|작업 재개| WORK
-        DOCK -->|2| IDLE
-        DOCK -->|3 포인트명| MP
+    subgraph POINT[포인트 이동]
+        WORK -->|키 3 + 포인트명| MP[Move_point]
+        STOP[Stop] -->|키 4 + 포인트명| MP
+        HOME -->|키 2 + 포인트명| MP
+        DK -->|키 3 + 포인트명| MP
+        MP -->|진입 즉시| MP_RUN[포인트 이동 실행]
+        MP_RUN -->|성공| IDLE
+        MP_RUN -->|실패| STOP
+        MP -->|키 2| STOP
+        MP -->|키 3| HOME
+        MP -->|키 4 이상| IDLE
+    end
+
+    subgraph RECOVERY[정지·복구]
+        WORK -->|키 1 / 장애물 / 안전| STOP
+        STOP -->|키 1 재개| WORK
+        STOP -->|키 2| IDLE
+        STOP -->|키 3| HOME
     end
 
     subgraph MANUAL[수동 조작]
         MAN[Manual]
-        MODE[Assist / Regular]
-        MAN -->|3/4| MODE
-        MAN -->|1| IDLE
-        MAN -->|2| STOP
+        MODE[Manual_Regular<br/>또는 Manual_Assist]
+        MAN -->|키 3/4| MODE
+        MAN -->|키 1| IDLE
+        MAN -->|키 2| STOP
     end
 
-    CD -->|startup task + 도크 장착| DOCK
-    CD -->|그 외| IDLE
-    IDLE -->|4| HOME
-    IDLE -->|7| DEBUG[Debug]
-    WORK -->|1 / 장애물 / 안전| STOP
-    WORK -->|2 / 작업 완료| HOME
-    MOVE -->|실패| STOP
-    MP -->|2| STOP
-    MP -->|3| HOME
-    MP -->|4 이상| IDLE
-
-    IDLE -.->|16| MAN
-    STOP -.->|16| MAN
-    HOME -.->|16| MAN
-    MP -.->|16| MAN
-    DOCK -.->|16| MAN
+    IDLE -.->|키 16| MAN
+    STOP -.->|키 16| MAN
+    HOME -.->|키 16| MAN
+    MP -.->|키 16| MAN
+    DK -.->|키 16| MAN
 
     classDef normal fill:#e8f1ff,stroke:#2563eb,color:#111;
     classDef control fill:#fff4d6,stroke:#d97706,color:#111;
     classDef safety fill:#ffe4e6,stroke:#e11d48,color:#111;
-    class IDLE,WORK,MP,MOVE,HOME,DOCK,DEBUG normal;
+    class IDLE,WORK,RUN,HOME,DK,MP,MP_RUN,CM,CD normal;
     class MAN,MODE control;
     class STOP safety;
 ```
-
-## 11. Move_point 기능
-
-`Move_point`는 저장된 포인트를 선택해서 이동하는 상태다. 현재 `Idle`의
-키 6으로 직접 들어가지 않고, 주로 `Work`, `Stop`, `Home`, `Docking`에서
-진입한다.
-
-| 진입 경로 | 의미 |
-|---|---|
-| `Work` 키 3 + 포인트명 | 작업 중 포인트 이동으로 전환 및 즉시 실행 |
-| `Stop` 키 4 + 포인트명 | 정지 상태에서 포인트 이동 선택 및 즉시 실행 |
-| `Home` 키 2 + 포인트명 | 홈 이동 중 포인트 이동 선택 및 즉시 실행 |
-| `Docking` 키 3 + 포인트명 | 도크 상태에서 포인트 이동 선택 및 즉시 실행 |
-
-| 키/조건 | 동작 |
-|---|---|
-| 2 | 이동 취소 후 `Stop` |
-| 3 | 이동 취소 후 `Home` |
-| 4 이상 | 이동 취소 후 `Idle` |
-| 이동 성공 | `Idle` |
-| 이동 실패 | `Stop` |
-| 16 | `Manual` 진입 요청. 단, 실제 전이는 전역 조건에서 처리 |
-
-포인트명은 `Move_point`로 전이하는 명령과 함께 전달한다. `Move_point`에
-진입하면 포인트 이동 서버를 즉시 호출하며, 도착 후 추가 작업과 대기 시간을
-건너뛰도록 `buffer=1`을 사용한다. 따라서 `Move_point` 진입 후 별도의 키 1을
-입력하지 않는다.
-
-## 12. Run task 기능
-
-Run task는 `Idle`에서 작업 이름을 선택하고 YAML에 정의된 작업 설정을
-적용한 뒤 `Work`로 진입하는 흐름이다.
-
-```text
-Idle 키 3
-  ↓
-선택한 task를 YAML에서 조회
-  ├─ task 없음 → Idle 유지
-  └─ task 존재
-       ↓
-     도크 상태 확인 및 필요 시 도크 이탈
-       ↓
-     task 설정(loop/wait 등) 적용
-       ↓
-     Work 진입
-```
-
-Run task와 관련된 주요 입력은 다음과 같다.
-
-| 위치 | 키 | 동작 |
-|---|---:|---|
-| `Idle` | 3 | 선택한 일반 task 실행 |
-| `Idle` | 5 | `startup.task` 실행 |
-| `Work` | 1 | 작업 정지 후 `Stop` |
-| `Work` | 2 | 작업 취소 후 `Home` |
-| `Work` | 3 + 포인트명 | 현재 작업을 멈추고 `Move_point` 즉시 실행 |
-| `Work` | 4 | 작업 반복/다음 작업/복귀 흐름 처리 |
-
-`Idle` 키 1의 포인트 이동은 일반 task와 구분된다. 키 1은 선택한 포인트를
-단일 이동 작업으로 `Work`에 전달하고, `point_task=true`로 설정한다.
-
-## 13. Stop 기능
-
-`Stop`은 단순 대기 상태가 아니라 정지 원인과 직전 상태를 이용해 다음 동작을
-결정하는 복구 상태다.
-
-```text
-Work/Home/Move_point
-          │ 장애물·안전·수동 정지
-          ▼
-        Stop
-       ├─ 1: 이전 작업/이동 재개
-       ├─ 2: Idle
-       ├─ 3: Home
-       ├─ 4: Move_point
-       └─ 16: Manual
-```
-
-정지 원인별 처리:
-
-| 정지 원인 | 처리 |
-|---|---|
-| 수동 정지 | 사용자가 재개·복귀·대기 중 하나를 선택 |
-| 장애물 정지 | 장애물이 사라지면 이전 작업 위치부터 재개 가능 |
-| 안전 정지 | 안전 상태가 해제된 뒤 정지 상태에서 재개 |
-| 비상 정지 | `EmergencyStop`을 거친 경우 정지 원인을 Emergency로 유지 |
-| 경로 실패 | 자동 재개하지 않고 `Stop`에서 사용자 판단 |
-
-## 14. Manual 기능
-
-`Manual`은 외부 조작기에서 속도 명령을 전달하는 상태다. 작업 실행 중인
-`Work`에서는 수동 진입을 막고, `Idle`, `Stop`, `Home`, `Move_point`,
-`Docking` 등에서 키 16으로 진입할 수 있다.
-
-```text
-키 16
-  ↓
-Manual 내부 진입
-  ↓
-SetMode 요청
-  ↓
-/robot_udp/basic_status 확인
-  ├─ control_usage_mode=0 → Manual_Regular
-  └─ control_usage_mode=2 → Manual_Assist
-```
-
-수동 속도 명령의 연결은 다음과 같다.
-
-```text
-외부 컨트롤러
-      │
-      ▼
-cmd_vel_manual (geometry_msgs/Twist)
-      │ Manual 활성 및 모드 확인
-      ▼
-cmd_vel_manual 콜백
-      │
-      ▼
-/cmd_vel
-      │
-      ▼
-로봇 속도 제어 계층
-```
-
-Manual 내부 키 동작:
-
-| 키 | 동작 |
-|---:|---|
-| 1 | Manual 종료 후 `Idle` |
-| 2 | Manual 종료 후 `Stop` |
-| 3 | Assist 모드 요청 |
-| 4 | Regular 모드 요청 |
-
-Manual 상태에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`·`Stop`
-전이를 수행하지 않는다. 다만 배터리 강제 복귀 로직은 별도 전역 로직이므로
-조건에 따라 Manual 종료 후 `Home`으로 보낼 수 있다.
-
-핵심 구조는 `Idle`에서 작업을 시작하고, 작업 중 문제가 생기면 `Stop`에서
-복구 방향을 선택하며, 수동 조작은 `Manual`에서만 외부 속도 입력을 허용하는
-것이다.
