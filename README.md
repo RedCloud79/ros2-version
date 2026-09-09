@@ -1,10 +1,5 @@
 # state_machine_litever.cpp 기능 정리
 
-대상 파일: [`src/state_machine_litever.cpp`](src/state_machine_litever.cpp)
-
-`state_machine_litever.cpp`는 순찰 작업, 포인트 이동, 수동 조작, 정지·복구,
-홈 이동 및 도킹 상태를 관리하는 상태 머신이다.
-
 ## 1. 상태 목록
 
 | 상태 | 역할 |
@@ -188,23 +183,121 @@ Move_point
 
 ### Manual
 
-Manual 진입 후 `SetMode`를 요청하고 `/robot_udp/basic_status`의
-`control_usage_mode`를 확인한다.
+Manual은 순찰·자율주행 작업을 잠시 중단하고 외부 조작기로 로봇을 직접
+움직이는 상태다. 내부 FSM 상태명은 `Manual`이지만, 외부에 발행하는 상태명은
+BasicStatus의 제어 모드에 따라 구분한다.
 
-| 값 | 상태 발행명 |
-|---:|---|
-| 0 (Regular) | `Manual_Regular` |
-| 2 (Assist) | `Manual_Assist` |
+### 진입 조건
 
-내부 상태명은 `Manual`로 유지하지만 상태 토픽에는 `Manual`을 직접 발행하지
-않는다. 수동 속도 입력은 다음 흐름으로 전달된다.
+키 16으로 진입할 수 있는 상태는 `Idle`, `Stop`, `Home`, `Move_point`,
+`Docking`이다. `Work`에서는 작업 중 직접 Manual로 진입하지 못한다.
+순찰 중 수동 조작이 필요하면 먼저 `Stop`으로 이동한 뒤 키 16을 입력한다.
 
 ```text
-외부 조작기 → cmd_vel_manual → 모드 확인 → /cmd_vel → 로봇 제어 계층
+Idle / Stop / Home / Move_point / Docking
+                    ↓ 키 16
+                  Manual
 ```
 
+`manual_control_enabled` 토픽이나 별도의 Enable 플래그는 사용하지 않는다.
+Manual 진입 명령인 키 16이 직접 진입 조건이다.
+
+### 진입 직후 제어 모드 확인
+
+Manual에 들어오면 이전에 확인된 모드를 먼저 확인한다.
+
+1. 이전 BasicStatus가 Assist(2) 또는 Regular(0)이면 해당 모드를 유지한다.
+2. 모드가 없거나 Navigation(1) 등 알 수 없는 값이면 Regular(0)을 요청한다.
+3. `SetMode` 서비스를 호출한다.
+4. `/robot_udp/basic_status`가 요청한 값을 다시 보내는지 확인한다.
+5. 확인이 완료된 뒤에만 수동 속도 명령을 허용한다.
+
+```text
+키 16
+  ↓
+Manual 내부 진입
+  ↓
+현재 모드 확인
+  ├─ 0 → Regular 유지 요청
+  ├─ 2 → Assist 유지 요청
+  └─ 그 외 → Regular 요청
+  ↓
+SetMode
+  ↓
+BasicStatus.control_usage_mode 확인
+  ↓
+Manual_Regular 또는 Manual_Assist 발행
+```
+
+제어 모드 값과 외부 상태명:
+
+| `control_usage_mode` | 의미 | 상태 발행명 |
+|---:|---|---|
+| 0 | Regular mode | `Manual_Regular` |
+| 1 | Navigation mode | Manual 진입 시 Regular로 정규화 |
+| 2 | Assist mode | `Manual_Assist` |
+
+BasicStatus 확인 전에는 `Manual` 상태를 발행하지 않는다. 따라서 클라이언트는
+`Manual_Regular` 또는 `Manual_Assist`를 받아야 수동 제어 화면을 표시한다.
+
+### 수동 속도 명령 흐름
+
+```text
+외부 조작기
+    ↓ geometry_msgs/Twist
+cmd_vel_manual
+    ↓ manual_active && manual_requested && manual_mode_ready
+유효한 linear.x, linear.y, angular.z만 통과
+    ↓
+/cmd_vel
+    ↓
+로봇 속도 제어 계층
+```
+
+다음 조건을 모두 만족해야 `cmd_vel_manual`이 `/cmd_vel`로 전달된다.
+
+- 현재 Manual 상태일 것
+- Manual 제어 요청이 활성화되어 있을 것
+- `SetMode` 요청 결과가 BasicStatus로 확인되었을 것
+- 속도 값이 유한한 값일 것
+
+Manual 자체에서는 주기적으로 0 속도를 발행하는 watchdog을 사용하지 않는다.
+실제 정지·속도 제어는 외부 조작기와 로봇 제어 계층이 담당한다.
+
+### Manual 내부 키 동작
+
+| 키 | 동작 |
+|---:|---|
+| 1 | 모드 확인 후 Manual 종료, `Idle` 전이 |
+| 2 | Regular 모드 요청 후 Manual 종료, `Stop` 전이 |
+| 3 | Assist 모드 요청, Manual 유지 |
+| 4 | Regular 모드 요청, Manual 유지 |
+| 21 | Stand 모션 상태 요청 |
+| 22 | Sitting 모션 상태 요청 |
+
+키 3·4는 상태를 나가는 명령이 아니라 제어 모드만 바꾸는 명령이다.
+모드 변경 후 BasicStatus가 확인되면 상태 발행명이 각각
+`Manual_Assist`·`Manual_Regular`로 바뀐다.
+
+### Manual 종료 처리
+
+키 1 또는 키 2가 들어오면 새 속도 입력을 받지 않도록 Manual 요청을
+비활성화하고 Regular(0) 모드를 요청한다.
+
+```text
+Manual
+  ├─ 키 1 → Regular 확인 → Idle
+  └─ 키 2 → Regular 확인 → Stop
+```
+
+이미 Regular 모드가 확인된 경우에는 중복 요청을 줄이고 바로 전이할 수 있다.
+Manual을 나갈 때 내부 수동 플래그와 입력 데이터는 초기화한다.
+
+### 안전 관련 예외
+
 Manual에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`·`Stop`
-전이를 수행하지 않는다. 단, 배터리 강제 복귀는 별도 전역 로직이므로
+전이를 수행하지 않는다. 즉 Manual 진입 후에는 해당 두 안전 조건만으로
+자동 상태 전이를 하지 않는다. 다만 배터리 강제 복귀는 별도 전역 로직이므로
 조건에 따라 Manual 종료 후 `Home`으로 이동할 수 있다.
 
 ## 5. 도킹·홈 복귀
