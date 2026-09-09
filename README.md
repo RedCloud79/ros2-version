@@ -28,22 +28,6 @@ CheckMap → CheckData → Idle
 
 `startup.task`가 설정되어 있어도 부팅 직후 자동 실행하지 않는다. `Idle`에서 키 5를 입력했을 때 startup task를 실행한다.
 
-상태 머신은 `/dock/is_docked`(`std_msgs/Bool`)를 구독한다. 이 토픽은 상태
-머신이 직접 UDP를 읽어서 만드는 값이 아니라, `robot_udp_connect`의
-`docking_manager`가 UDP 상태를 종합해 발행한다.
-
-`docking_manager`의 도킹 판단 기준은 다음과 같다.
-
-| UDP 상태 | `/dock/is_docked` |
-|---|---|
-| `BasicStatus.charge == 2` (`Charging`) | `true` |
-| `BatteryStatus.charge_left` 또는 `charge_right`가 `true` | `true` |
-| `BasicStatus.charge == 5` (도크에 있으나 미충전) | `true` |
-| 위 조건이 모두 아니면 | `false` |
-
-따라서 `true`는 충전 중뿐 아니라 물리적으로 도크에 있거나 접점이 감지된
-상태를 포함한다. `/dock/is_docked`가 2초 이상 갱신되지 않으면 상태 머신은
-안전을 위해 도킹되지 않은 것으로 처리한다.
 ## 3. 순찰(run_task) 흐름
 
 ### 3.1 처음 켰을 때 Idle인 경우
@@ -249,30 +233,6 @@ Manual_Regular 또는 Manual_Assist 발행
 BasicStatus 확인 전에는 `Manual` 상태를 발행하지 않는다. 모드 확인 후
 `Manual_Regular` 또는 `Manual_Assist` 상태를 발행한다.
 
-### 수동 속도 명령 흐름
-
-```text
-외부 조작기
-    ↓ geometry_msgs/Twist
-cmd_vel_manual
-    ↓ manual_active && manual_requested && manual_mode_ready
-유효한 linear.x, linear.y, angular.z만 통과
-    ↓
-/cmd_vel
-    ↓
-로봇 속도 제어 계층
-```
-
-다음 조건을 모두 만족해야 `cmd_vel_manual`이 `/cmd_vel`로 전달된다.
-
-- 현재 Manual 상태일 것
-- Manual 제어 요청이 활성화되어 있을 것
-- `SetMode` 요청 결과가 BasicStatus로 확인되었을 것
-- 속도 값이 유한한 값일 것
-
-Manual 자체에서는 주기적으로 0 속도를 발행하는 watchdog을 사용하지 않는다.
-실제 정지·속도 제어는 외부 조작기와 로봇 제어 계층이 담당한다.
-
 ### Manual 내부 키 동작
 
 | 키 | 동작 |
@@ -359,8 +319,10 @@ Manual에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`�
                 └─ 실패 → 현재 상태 유지
 ```
 
-홈 도착 후에는 `Docking`으로 전이하여 충전을 시작한다. 충전 완료 후에는
-`Charging`에서 대기하며, 작업이나 포인트 이동 시 `Undocking`을 수행한다.
+홈 도착 후에는 `Docking`으로 전이하여 충전소로 진입하고 충전을 시작한다.
+충전 중이거나 배터리가 100%가 되어 보호를 위해 충전 전류가 차단된 경우에도
+`Charging`에서 대기한다. 작업이나 포인트 이동 요청이 들어오면
+`Undocking`으로 전이하여 도크에서 나온 뒤 작업을 수행한다.
 
 ## 6. EmergencyStop 동작
 
