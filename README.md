@@ -353,7 +353,34 @@ Manual에서는 비상 버튼과 안전 감지에 의한 자동 `EmergencyStop`�
 홈 도착 후에는 `Docking`으로 전이할 수 있으며, 도킹 후 작업 대기, Idle
 복귀, 작업 재개 또는 포인트 이동을 선택한다.
 
-## 6. 주요 기능 연결 구조
+## 6. EmergencyStop 동작
+
+Emergency button 입력은 `is_emergency_button_pressed`(`std_msgs/Bool`)로
+수신한다. 다음 상태에서는 버튼이 눌려도 전역 자동 전이를 수행하지 않는다.
+
+| 현재 상태 | Emergency button 처리 |
+|---|---|
+| `CheckMap` | 자동 전이하지 않음 |
+| `CheckData` | 자동 전이하지 않음 |
+| `Manual` | 자동 `EmergencyStop` 전이하지 않음 |
+| `EmergencyStop` | 이미 해당 상태이므로 유지 |
+| 그 외 운용 상태 | `EmergencyStop`으로 전이 |
+
+운용 상태에서 버튼이 눌리면 현재 작업을 취소하고 경고등을 점멸시킨다.
+버튼이 해제될 때까지 `EmergencyStop`에 머물며, 해제되면 `Stop`으로 전이한다.
+
+```text
+운용 상태
+  ↓ Emergency button pressed
+EmergencyStop
+  ↓ button released
+Stop
+```
+
+주의: 현재 구현에서 `Manual`은 Emergency button 자동 전이 대상에서 제외되어
+있다. Manual 중 비상 버튼 동작까지 보장해야 한다면 이 조건을 별도로 변경해야 한다.
+
+## 7. 주요 기능 연결 구조
 
 순찰 시작, 도킹 복귀, 포인트 이동, 정지 복구 및 Manual 전환의 전체 연결
 관계는 다음과 같다.
@@ -397,6 +424,17 @@ flowchart LR
         STOP -->|키 3| HOME
     end
 
+    subgraph SAFETY[비상 정지]
+        ESTOP[EmergencyStop]
+        WORK -.->|Emergency button| ESTOP
+        IDLE -.->|Emergency button| ESTOP
+        MP -.->|Emergency button| ESTOP
+        STOP -.->|Emergency button| ESTOP
+        HOME -.->|Emergency button| ESTOP
+        DK -.->|Emergency button| ESTOP
+        ESTOP -->|button released| STOP
+    end
+
     subgraph MANUAL[수동 조작]
         MAN[Manual]
         MODE[Manual_Regular<br/>또는 Manual_Assist]
@@ -416,5 +454,5 @@ flowchart LR
     classDef safety fill:#ffe4e6,stroke:#e11d48,color:#111;
     class IDLE,WORK,RUN,HOME,DK,MP,MP_RUN,CM,CD normal;
     class MAN,MODE control;
-    class STOP safety;
+    class STOP,ESTOP safety;
 ```
