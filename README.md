@@ -1,7 +1,6 @@
 # state_machine_litever 동작 정리
 
-대상 파일은 `src/state_machine_litever.cpp`이며, 터미널 클라이언트는
-`src/market_state_client.cpp`에서 상태별 메뉴를 표시한다.
+대상 파일은 `src/state_machine_litever.cpp`이다.
 
 ## 1. 상태 목록
 
@@ -48,7 +47,7 @@ startup task가 설정되어 있어도 부팅 직후 실행하지 않는다. sta
 | 2 | 충전 중 | `Charging` 전이 |
 | 3 | 충전소 이탈 중 | `Undocking` 유지 |
 | 4 | 로봇 오류 | 도킹 동작 실패 가능 |
-| 5 | 도크 위지만 미충전 | 충전 시작 재시도 |
+| 5 | 도크 위지만 미충전·보호 충전 종료 | 도크 위에서 `Charging` 유지, 재시도하지 않음 |
 
 `Charge` 명령값은 상태값과 다르다.
 
@@ -91,6 +90,7 @@ Charging
 ```text
 Undocking
   ↓ Charge(0)
+  ↓ charge=2: 충전 중단 요청 전 상태
   ↓ charge=3: 도크 이탈 중
   ↓ charge=0 && /dock/is_docked=false
 Work / Move_point
@@ -302,7 +302,7 @@ flowchart TD
     CH -->|키 5| UD
     CH -.->|키 16/20/21/22 허용| MAN
 
-    UD -->|Charge(0), charge=3| UWAIT[도크 이탈 중]
+    UD -->|Charge(0): charge=2 → 3| UWAIT[도크 이탈 중]
     UWAIT -->|Work 대상| WORK
     UWAIT -->|Move_point 대상| MP
 
